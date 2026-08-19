@@ -95,6 +95,7 @@ void Error_Handler(void);
 #define MII_RXD1_GPIO_Port GPIOC
 #define MII_RXD2_Pin GPIO_PIN_0
 #define MII_RXD2_GPIO_Port GPIOB
+
 /* USER CODE BEGIN Private defines */
 
 /* USER CODE END Private defines */

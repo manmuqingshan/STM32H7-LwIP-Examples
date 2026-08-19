@@ -39,6 +39,8 @@
 /* Private define ------------------------------------------------------------*/
 /* The time to block waiting for input. */
 #define TIME_WAITING_FOR_INPUT ( portMAX_DELAY )
+/* Time to block waiting for transmissions to finish */
+#define ETHIF_TX_TIMEOUT (2000U)
 /* USER CODE BEGIN OS_THREAD_STACK_SIZE_WITH_RTOS */
 /* ETH_CODE: increase stack size, otherwise there
  * might be overflow in more advanced applications.
@@ -58,18 +60,14 @@
 /* ETH_RX_BUFFER_SIZE parameter is defined in lwipopts.h */
 
 /* USER CODE BEGIN 1 */
-/* ETH_CODE: fix issue from STM32CubeMX.
- * SCB_InvalidateDCache_by_Addr not implemented on Cortex-M4
- * Replace it with synchronization barrier
- */
-#define SCB_InvalidateDCache_by_Addr(a,b) __DSB()
+
 /* USER CODE END 1 */
 
 /* Private variables ---------------------------------------------------------*/
 /*
 @Note: This interface is implemented to operate in zero-copy mode only:
-        - Rx buffers are allocated statically and passed directly to the LwIP stack
-          they will return back to ETH DMA after been processed by the stack.
+        - Rx Buffers will be allocated from LwIP stack Rx memory pool,
+          then passed to ETH HAL driver.
         - Tx Buffers will be allocated from LwIP stack memory heap,
           then passed to ETH HAL driver.
 
@@ -107,10 +105,6 @@ LWIP_MEMPOOL_DECLARE(RX_POOL, ETH_RX_BUFFER_CNT, sizeof(RxBuff_t), "Zero-copy RX
 
 /* Variable Definitions */
 static uint8_t RxAllocStatus;
-
-__IO uint32_t TxPkt = 0;
-__IO uint32_t RxPkt = 0;
-
 #if defined ( __ICCARM__ ) /*!< IAR Compiler */
 
 #pragma location=0x30040000
@@ -130,35 +124,25 @@ ETH_DMADescTypeDef DMATxDscrTab[ETH_TX_DESC_CNT] __attribute__((section(".TxDecr
 
 #endif
 
-/* USER CODE BEGIN 2 */
-/* ETH_CODE: placement of RX_POOL
- * Please note this was tested only for GCC compiler.
- * Additional code needed in linkerscript for GCC.
- *
- * Also this buffer can be placed in D1 SRAM
- * if there is not sufficient space in D2.
- * This can be case of STM32H72x/H73x devices.
- * However the 32-byte alignment should be forced.
- * Below is example of placement into BSS section
- *
- * . = ALIGN(32);
- * *(.Rx_PoolSection)
- * . = ALIGN(4);
- * _ebss = .;
- *  __bss_end__ = _ebss;
- * } >RAM_D1
- */
-
 #if defined ( __ICCARM__ ) /*!< IAR Compiler */
-#pragma location = 0x10040200
+#pragma location = 0x30000100
 extern u8_t memp_memory_RX_POOL_base[];
 
-#elif defined ( __CC_ARM )  /* MDK ARM Compiler */
-__attribute__((at(0x10004200)) extern u8_t memp_memory_RX_POOL_base[];
+#elif defined ( __CC_ARM ) /* MDK ARM Compiler */
+__attribute__((section(".Rx_PoolSection"))) extern u8_t memp_memory_RX_POOL_base[];
 
-#elif defined ( __GNUC__ ) /* GNU Compiler */
+#elif defined ( __GNUC__ ) /* GNU */
 __attribute__((section(".Rx_PoolSection"))) extern u8_t memp_memory_RX_POOL_base[];
 #endif
+
+/* USER CODE BEGIN 2 */
+/* ETH_CODE: Check if there is proper configuration corresponding to the number of TCP connections */
+#if TCP_QUEUE_OOSEQ
+#define ETH_RX_BUFFER_PER_TCP    ((TCP_WND + TCP_MSS - 1) / TCP_MSS) /* (TCP_WND / TCP_MSS) rounded up */
+#if (ETH_RX_BUFFER_CNT < (MEMP_NUM_TCP_PCB * ETH_RX_BUFFER_PER_TCP))
+#error ETH_RX_BUFFER_CNT value is insufficient, either increase it or set TCP_QUEUE_OOSEQ = 0
+#endif
+#endif /* TCP_QUEUE_OOSEQ */
 /* USER CODE END 2 */
 
 osSemaphoreId RxPktSemaphore = NULL;   /* Semaphore to signal incoming packets */
@@ -276,7 +260,6 @@ static void low_level_init(struct netif *netif)
   LWIP_MEMPOOL_INIT(RX_POOL);
 
 #if LWIP_ARP || LWIP_ETHERNET
-
   /* set MAC hardware address length */
   netif->hwaddr_len = ETH_HWADDR_LEN;
 
@@ -300,10 +283,10 @@ static void low_level_init(struct netif *netif)
   #endif /* LWIP_ARP */
 
   /* create a binary semaphore used for informing ethernetif of frame reception */
-  RxPktSemaphore = osSemaphoreNew(1, 1, NULL);
+  RxPktSemaphore = osSemaphoreNew(1, 0, NULL);
 
   /* create a binary semaphore used for informing ethernetif of frame transmission */
-  TxPktSemaphore = osSemaphoreNew(1, 1, NULL);
+  TxPktSemaphore = osSemaphoreNew(1, 0, NULL);
 
   /* create the task that handles the ETH_MAC */
 /* USER CODE BEGIN OS_THREAD_NEW_CMSIS_RTOS_V2 */
@@ -321,7 +304,12 @@ static void low_level_init(struct netif *netif)
   LAN8742_RegisterBusIO(&LAN8742, &LAN8742_IOCtx);
 
   /* Initialize the LAN8742 ETH PHY */
-  LAN8742_Init(&LAN8742);
+  if(LAN8742_Init(&LAN8742) != LAN8742_STATUS_OK)
+  {
+    netif_set_link_down(netif);
+    netif_set_down(netif);
+    return;
+  }
 
   if (hal_eth_init_status == HAL_OK)
   {
@@ -368,7 +356,6 @@ static void low_level_init(struct netif *netif)
     HAL_ETH_Start_IT(&heth);
     netif_set_up(netif);
     netif_set_link_up(netif);
-
 /* USER CODE BEGIN PHY_POST_CONFIG */
 
 /* USER CODE END PHY_POST_CONFIG */
@@ -387,7 +374,7 @@ static void low_level_init(struct netif *netif)
 }
 
 /**
- * This function should do the actual transmission of the packet. The packet is
+ * @brief This function should do the actual transmission of the packet. The packet is
  * contained in the pbuf that is passed to the function. This pbuf
  * might be chained.
  *
@@ -407,7 +394,7 @@ static err_t low_level_output(struct netif *netif, struct pbuf *p)
   uint32_t i = 0U;
   struct pbuf *q = NULL;
   err_t errval = ERR_OK;
-  ETH_BufferTypeDef Txbuffer[ETH_TX_DESC_CNT];
+  ETH_BufferTypeDef Txbuffer[ETH_TX_DESC_CNT] = {0};
 
   memset(Txbuffer, 0 , ETH_TX_DESC_CNT*sizeof(ETH_BufferTypeDef));
 
@@ -438,19 +425,36 @@ static err_t low_level_output(struct netif *netif, struct pbuf *p)
 
   pbuf_ref(p);
 
-  HAL_ETH_Transmit_IT(&heth, &TxConfig);
-  while(osSemaphoreAcquire(TxPktSemaphore, TIME_WAITING_FOR_INPUT)!=osOK)
-
+  do
   {
-  }
+    if(HAL_ETH_Transmit_IT(&heth, &TxConfig) == HAL_OK)
+    {
+      errval = ERR_OK;
+    }
+    else
+    {
 
-  HAL_ETH_ReleaseTxPacket(&heth);
+      if(HAL_ETH_GetError(&heth) & HAL_ETH_ERROR_BUSY)
+      {
+        /* Wait for descriptors to become available */
+        osSemaphoreAcquire(TxPktSemaphore, ETHIF_TX_TIMEOUT);
+        HAL_ETH_ReleaseTxPacket(&heth);
+        errval = ERR_BUF;
+      }
+      else
+      {
+        /* Other error */
+        pbuf_free(p);
+        errval =  ERR_IF;
+      }
+    }
+  }while(errval == ERR_BUF);
 
   return errval;
 }
 
 /**
- * Should allocate a pbuf and transfer the bytes of the incoming
+ * @brief Should allocate a pbuf and transfer the bytes of the incoming
  * packet from the interface into the pbuf.
  *
  * @param netif the lwip network interface structure for this ethernetif
@@ -470,7 +474,7 @@ static struct pbuf * low_level_input(struct netif *netif)
 }
 
 /**
- * This function should be called when a packet is ready to be read
+ * @brief This function should be called when a packet is ready to be read
  * from the interface. It uses the function low_level_input() that
  * should handle the actual reception of bytes from the network
  * interface. Then the type of the received packet is determined and
@@ -524,7 +528,7 @@ static err_t low_level_output_arp_off(struct netif *netif, struct pbuf *q, const
 #endif /* LWIP_ARP */
 
 /**
- * Should be called at the beginning of the program to set up the
+ * @brief Should be called at the beginning of the program to set up the
  * network interface. It calls the function low_level_init() to do the
  * actual setup of the hardware.
  *
@@ -615,6 +619,12 @@ u32_t sys_now(void)
 }
 
 /* USER CODE END 6 */
+
+/**
+  * @brief  Initializes the ETH MSP.
+  * @param  ethHandle: ETH handle
+  * @retval None
+  */
 
 void HAL_ETH_MspInit(ETH_HandleTypeDef* ethHandle)
 {
@@ -786,7 +796,6 @@ int32_t ETH_PHY_IO_GetTick(void)
 
 /**
   * @brief  Check the ETH link state then update ETH driver and netif link accordingly.
-  * @param  argument: netif
   * @retval None
   */
 void ethernet_link_thread(void* argument)
@@ -797,12 +806,6 @@ void ethernet_link_thread(void* argument)
 
   struct netif *netif = (struct netif *) argument;
 /* USER CODE BEGIN ETH link init */
-  /* ETH_CODE: call HAL_ETH_Start_IT instead of HAL_ETH_Start
-   * This is required for operation with RTOS.
-   * This trick allows to keep this change through
-   * code re-generation by STM32CubeMX
-   */
-#define HAL_ETH_Start HAL_ETH_Start_IT
   /* ETH_CODE: workaround to call LOCK_TCPIP_CORE when accessing netif link functions*/
   LOCK_TCPIP_CORE();
 /* USER CODE END ETH link init */
@@ -819,6 +822,7 @@ void ethernet_link_thread(void* argument)
   }
   else if(!netif_is_link_up(netif) && (PHYLinkState > LAN8742_STATUS_LINK_DOWN))
   {
+
     switch (PHYLinkState)
     {
     case LAN8742_STATUS_100MBITS_FULLDUPLEX:
@@ -852,7 +856,7 @@ void ethernet_link_thread(void* argument)
       MACConf.DuplexMode = duplex;
       MACConf.Speed = speed;
       HAL_ETH_SetMACConfig(&heth, &MACConf);
-      HAL_ETH_Start(&heth);
+      HAL_ETH_Start_IT(&heth);
       netif_set_up(netif);
       netif_set_link_up(netif);
     }
@@ -928,9 +932,6 @@ void HAL_ETH_RxLinkCallback(void **pStart, void **pEnd, uint8_t *buff, uint16_t 
   {
     p->tot_len += Length;
   }
-
-  /* Invalidate data cache because Rx DMA's writing to physical memory makes it stale. */
-  SCB_InvalidateDCache_by_Addr((uint32_t *)buff, Length);
 
 /* USER CODE END HAL ETH RxLinkCallback */
 }

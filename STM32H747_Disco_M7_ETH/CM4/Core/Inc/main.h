@@ -71,6 +71,7 @@ void Error_Handler(void);
 #define ARD_A2_GPIO_Port GPIOA
 #define ARD_A3_Pin GPIO_PIN_1
 #define ARD_A3_GPIO_Port GPIOA
+
 /* USER CODE BEGIN Private defines */
 
 /* USER CODE END Private defines */

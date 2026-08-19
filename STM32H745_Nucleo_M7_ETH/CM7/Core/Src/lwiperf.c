@@ -531,11 +531,21 @@ lwiperf_tcp_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err)
   }
 
   packet_idx = 0;
-  for (q = p; q != NULL; q = q->next) {
 #if LWIPERF_CHECK_RX_DATA
+  u16_t split = 0;
+  for (q = p; q != NULL; /*q = q->next*/) {
+    u16_t i = 0;
     const u8_t *payload = (const u8_t *)q->payload;
-    u16_t i;
-    for (i = 0; i < q->len; i++) {
+    u16_t q_len = q->len;
+    if(split == 0){
+      u32_t bytes_in_seq = ((conn->bytes_transferred - 24) % (1024 * 128));
+      if((bytes_in_seq + q_len + packet_idx) > (1024*128)){
+        /* This packet contains start of new sequence so we need to split */
+        q_len -= (bytes_in_seq + q_len + packet_idx) - (1024*128);
+      }
+    }
+
+    for (i = split; i < q_len; i++) {
       u8_t val = payload[i];
       u8_t num = val - '0';
       if (num == conn->next_num) {
@@ -549,9 +559,25 @@ lwiperf_tcp_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err)
         return ERR_OK;
       }
     }
-#endif
+
+    if(q_len != q->len){
+      /* Reset the sequence */
+      conn->next_num = 4;
+      /* Process the same header again after skipping the header */
+      split = q_len + 24;
+    }
+    else {
+      split = 0;
+      packet_idx += q->len;
+      /* Move to next packet */
+      q = q->next;
+    }
+  }
+#else
+  for (q = p; q != NULL; q = q->next) {
     packet_idx += q->len;
   }
+#endif
   LWIP_ASSERT("count mismatch", packet_idx == p->tot_len);
   conn->bytes_transferred += packet_idx;
   tcp_recved(tpcb, tot_len);

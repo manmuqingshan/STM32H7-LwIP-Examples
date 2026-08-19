@@ -85,6 +85,7 @@ void Error_Handler(void);
 #define ETH_RXD0_GPIO_Port GPIOC
 #define ETH_RXD1_Pin GPIO_PIN_5
 #define ETH_RXD1_GPIO_Port GPIOC
+
 /* USER CODE BEGIN Private defines */
 
 /* USER CODE END Private defines */

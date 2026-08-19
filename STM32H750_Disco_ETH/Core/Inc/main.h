@@ -153,6 +153,7 @@ void Error_Handler(void);
 #define MII_RX_D2_GPIO_Port GPIOB
 #define FDCAN2_TX_Pin GPIO_PIN_13
 #define FDCAN2_TX_GPIO_Port GPIOB
+
 /* USER CODE BEGIN Private defines */
 
 /* USER CODE END Private defines */

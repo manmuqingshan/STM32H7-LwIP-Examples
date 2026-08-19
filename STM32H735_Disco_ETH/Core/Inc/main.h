@@ -313,6 +313,7 @@ void Error_Handler(void);
 #define STMOD_18_GPIO_Port GPIOE
 #define LCD_G3_Pin GPIO_PIN_11
 #define LCD_G3_GPIO_Port GPIOE
+
 /* USER CODE BEGIN Private defines */
 
 /* USER CODE END Private defines */

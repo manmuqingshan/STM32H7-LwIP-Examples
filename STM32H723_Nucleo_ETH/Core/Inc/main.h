@@ -7,7 +7,7 @@
   ******************************************************************************
   * @attention
   *
-  * Copyright (c) 2022 STMicroelectronics.
+  * Copyright (c) 2025 STMicroelectronics.
   * All rights reserved.
   *
   * This software is licensed under terms that can be found in the LICENSE file
@@ -103,6 +103,7 @@ void Error_Handler(void);
 #define SWO_GPIO_Port GPIOB
 #define LED_YELLOW_Pin GPIO_PIN_1
 #define LED_YELLOW_GPIO_Port GPIOE
+
 /* USER CODE BEGIN Private defines */
 
 /* USER CODE END Private defines */

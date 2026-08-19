@@ -38,8 +38,8 @@ ENTRY(Reset_Handler)
 /* Highest address of the user mode stack */
 _estack = ORIGIN(RAM_D1) + LENGTH(RAM_D1); /* end of "RAM_D1" Ram type memory */
 
-_Min_Heap_Size = 0x200 ; /* required amount of heap  */
-_Min_Stack_Size = 0x400 ; /* required amount of stack */
+_Min_Heap_Size = 0x200; /* required amount of heap  */
+_Min_Stack_Size = 0x400; /* required amount of stack */
 
 /* Memories definition */
 MEMORY
@@ -183,7 +183,7 @@ SECTIONS
     . = ABSOLUTE(0x30040000);
     *(.RxDecripSection) 
     
-    . = ABSOLUTE(0x30040060);
+    . = ABSOLUTE(0x30040100);
     *(.TxDecripSection)
     
     . = ABSOLUTE(0x30040200);

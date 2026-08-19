@@ -7,7 +7,7 @@
   ******************************************************************************
   * @attention
   *
-  * Copyright (c) 2022 STMicroelectronics.
+  * Copyright (c) 2025 STMicroelectronics.
   * All rights reserved.
   *
   * This software is licensed under terms that can be found in the LICENSE file
@@ -83,10 +83,9 @@ void MX_LWIP_Init(void)
   GATEWAY_ADDRESS[3] = 0;
 
 /* USER CODE BEGIN IP_ADDRESSES */
-
 /* USER CODE END IP_ADDRESSES */
 
-  /* Initilialize the LwIP stack with RTOS */
+  /* Initialize the LwIP stack with RTOS */
   tcpip_init( NULL, NULL );
 
   /* IP addresses initialization without DHCP (IPv4) */
@@ -100,16 +99,8 @@ void MX_LWIP_Init(void)
   /* Registers the default network interface */
   netif_set_default(&gnetif);
 
-  if (netif_is_link_up(&gnetif))
-  {
-    /* When the netif is fully configured this function must be called */
-    netif_set_up(&gnetif);
-  }
-  else
-  {
-    /* When the netif link is down this function must be called */
-    netif_set_down(&gnetif);
-  }
+  /* We must always bring the network interface up connection or not... */
+  netif_set_up(&gnetif);
 
   /* Set the link callback function, this function is called on change of link status*/
   netif_set_link_callback(&gnetif, ethernet_link_status_updated);

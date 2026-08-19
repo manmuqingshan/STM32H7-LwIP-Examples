@@ -7,7 +7,7 @@
   ******************************************************************************
   * @attention
   *
-  * Copyright (c) 2022 STMicroelectronics.
+  * Copyright (c) 2025 STMicroelectronics.
   * All rights reserved.
   *
   * This software is licensed under terms that can be found in the LICENSE file
@@ -20,7 +20,6 @@
 
 #ifndef __ETHERNETIF_H__
 #define __ETHERNETIF_H__
-
 #include "lwip/err.h"
 #include "lwip/netif.h"
 #include "cmsis_os.h"
